@@ -107,7 +107,9 @@ class Session:
         stamp = self._now().strftime("%Y-%m-%d_%H-%M-%S")
         self.name = f"Recording_{stamp}.mp4"
         self.take = self._cache / f"{stamp}.mp4"
-        argv = capture.command(self.take, self._token, self.config.fps, self.config.audio_kbps)
+        argv = capture.command(
+            self.take, self._token, self.config.fps, self.config.audio_kbps, capture.scope_unit()
+        )
         try:
             with open(self._cache / LOG_NAME, "w") as log:
                 self._process = self._spawn(argv, log)

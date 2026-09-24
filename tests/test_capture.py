@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from plasmarec import capture
+from plasmarec import APP_ID, capture
 
 
 def flag(argv: list[str], name: str) -> list[str]:
@@ -15,7 +16,9 @@ def flag(argv: list[str], name: str) -> list[str]:
 
 class Command(unittest.TestCase):
     def setUp(self) -> None:
-        self.argv = capture.command(Path("/c/take.mp4"), Path("/s/DP-2.token"), fps=30, audio_kbps=128)
+        self.argv = capture.command(
+            Path("/c/take.mp4"), Path("/s/DP-2.token"), fps=30, audio_kbps=128, unit="app-x-1.scope"
+        )
 
     def test_records_through_the_portal_with_the_monitors_token(self) -> None:
         # KMS capture (-w DP-2) would record the status card; only the portal
@@ -37,9 +40,27 @@ class Command(unittest.TestCase):
         self.assertEqual(flag(self.argv, "-write-first-frame-ts"), ["yes"])
         self.assertNotIn("-fm", self.argv)
 
-    def test_recorder_is_stopped_if_plasmarec_dies(self) -> None:
-        self.assertEqual(self.argv[:4], ["setpriv", "--pdeathsig", "INT", "--"])
-        self.assertEqual(self.argv[4], "gpu-screen-recorder")
+    def test_recorder_runs_in_plasmarecs_own_scope_and_dies_with_it(self) -> None:
+        # Regression: launched from a terminal instead of xremap, the portal saw
+        # a different app, ignored the saved token and showed its dialog again.
+        split = self.argv.index("--")
+        self.assertEqual(self.argv[:3], ["systemd-run", "--user", "--scope"])
+        self.assertIn("--unit=app-x-1.scope", self.argv[:split])
+        self.assertIn("--expand-environment=no", self.argv[:split])
+        rest = self.argv[split + 1 :]
+        self.assertEqual(rest[:5], ["setpriv", "--pdeathsig", "INT", "--", "gpu-screen-recorder"])
+
+
+class ScopeUnit(unittest.TestCase):
+    def test_names_parse_back_to_the_app_id(self) -> None:
+        # The portal reads app-<id>-<random>.scope: everything after the last
+        # hyphen is the random part, so neither it nor the id may contain one.
+        unit = capture.scope_unit()
+        match = re.fullmatch(r"app-(.+)-([^-]+)\.scope", unit)
+        assert match is not None
+        self.assertEqual(match.group(1), APP_ID)
+        self.assertNotIn("-", APP_ID)
+        self.assertNotEqual(unit, capture.scope_unit())
 
 
 class FirstFrame(unittest.TestCase):

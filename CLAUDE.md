@@ -83,6 +83,13 @@ Set up once: `uv venv --system-site-packages --python /usr/bin/python3 && uv syn
   so the delivered file never carries mic audio from outside a call.
 - **`setpriv --pdeathsig INT`** so the recorder saves instead of recording on
   unattended if the Python process dies.
+- **The recorder runs in `app-<app id>-<random>.scope`.** The portal files
+  restore tokens under the caller's app id, parsed from its systemd unit. A
+  token saved when xremap launched the recorder (`xremap.service`) was ignored
+  when a terminal launched it (`app-foot@....service`), and KDE's dialog came
+  back. `systemd-run --scope` execs in place, so the pid, the SIGINT stop and
+  the pdeathsig are unchanged; `--expand-environment=no` because it otherwise
+  rewrites `$` in arguments.
 - **uv must be pointed at /usr/bin/python3.** Left alone, `uv venv` picked a
   uv-managed CPython 3.13 that cannot import the system's PyGObject.
 - **PKGBUILD lives in `packaging/arch/`.** At the repo root, makepkg checks

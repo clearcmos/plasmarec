@@ -21,7 +21,8 @@ the video.
 - [gpu-screen-recorder](https://git.dec05eba.com/gpu-screen-recorder/about/),
   ffmpeg, PipeWire (`pw-dump`), xdg-desktop-portal-kde.
 - Python 3.12+ with PyGObject and pycairo, GTK 4, gtk4-layer-shell,
-  libnotify (`notify-send`), util-linux (`setpriv`).
+  libnotify (`notify-send`), util-linux (`setpriv`), and a systemd user
+  session (systemd 254 or later).
 
 ## Install
 

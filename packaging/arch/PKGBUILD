@@ -9,7 +9,7 @@ url='https://github.com/clearcmos/plasmarec'
 license=('MIT')
 depends=(
     'python' 'python-gobject' 'python-cairo' 'gtk4' 'gtk4-layer-shell'
-    'gpu-screen-recorder' 'ffmpeg' 'pipewire' 'libnotify' 'util-linux'
+    'gpu-screen-recorder' 'ffmpeg' 'pipewire' 'libnotify' 'util-linux' 'systemd'
     'kwin>=6.6' 'xdg-desktop-portal-kde'
 )
 makedepends=('git' 'python-build' 'python-installer' 'python-hatchling' 'python-wheel')

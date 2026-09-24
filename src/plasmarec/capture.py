@@ -8,12 +8,21 @@ reads the scanout buffer instead and would record the card.
 The portal cannot be told which monitor to share, so each monitor keeps its
 own restore token: the first recording of a monitor shows KDE's share dialog
 once, and later ones restore that choice without asking.
+
+The portal files those tokens under the calling app, which it identifies by
+the caller's systemd unit. Launched from xremap, a KDE shortcut or a terminal,
+the recorder would land in a different unit each time and every monitor would
+ask again. So the recorder always runs in a transient scope named after
+plasmarec's app id.
 """
 
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
+
+from plasmarec import APP_ID
 
 
 def state_dir() -> Path:
@@ -35,8 +44,20 @@ def first_frame_path(output: Path) -> Path:
     return Path(f"{output}.ts")
 
 
-def command(output: Path, token: Path, fps: int, audio_kbps: int) -> list[str]:
+def scope_unit() -> str:
+    """`app-<app id>-<random>.scope`, the form the portal parses an app id
+    from. The random part must not contain a hyphen, or it would be taken as
+    part of the id."""
+    return f"app-{APP_ID}-{uuid.uuid4().hex}.scope"
+
+
+def command(output: Path, token: Path, fps: int, audio_kbps: int, unit: str) -> list[str]:
     return [
+        # systemd-run --scope execs the command, so the recorder keeps this
+        # child's pid. --expand-environment=no: it would otherwise rewrite
+        # any $ in the arguments.
+        "systemd-run", "--user", "--scope", "--quiet", "--collect",
+        "--expand-environment=no", f"--unit={unit}", "--",
         # If plasmarec dies mid-take, the recorder gets SIGINT and saves
         # rather than recording on unattended.
         "setpriv", "--pdeathsig", "INT", "--",
