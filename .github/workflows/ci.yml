@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLASMAREC_REQUIRE_NODE: "1"
+
+jobs:
+  # Arch is the target platform and ships current KWin, GTK and
+  # gpu-screen-recorder; the image floats on purpose (see CLAUDE.md).
+  checks:
+    name: Lint, types, tests (Arch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: archlinux:latest
+    steps:
+      - name: Install system packages
+        run: >-
+          pacman -Syu --noconfirm --needed git make python python-gobject
+          python-cairo gtk4 gtk4-layer-shell ffmpeg nodejs uv
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create the dev environment
+        run: |
+          uv venv --system-site-packages --python /usr/bin/python3
+          uv sync --locked
+      - name: Lint and format check
+        run: make lint
+      - name: Type check
+        run: make typecheck
+      - name: Tests with the coverage gate
+        run: make coverage
+
+  # The oldest supported Python: KDE neon, the Plasma-first distribution,
+  # builds on Ubuntu 24.04 and its Python 3.12.
+  floor:
+    name: Tests (Python 3.12, Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends python3-gi gir1.2-glib-2.0 ffmpeg nodejs
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Create the dev environment
+        run: |
+          uv venv --system-site-packages --python /usr/bin/python3
+          .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
+          uv sync --locked
+      - name: Tests
+        run: uv run pytest -q
+
+  # Builds, checks and packages the PKGBUILD from this commit, then asserts
+  # the package carries every file a working install needs.
+  package:
+    name: Arch package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: archlinux:latest
+    steps:
+      - name: Install build tools
+        run: pacman -Syu --noconfirm --needed base-devel git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install package dependencies
+        run: |
+          # shellcheck disable=SC1091
+          source packaging/arch/PKGBUILD
+          pacman -S --noconfirm --needed "${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}"
+      - name: Build from this commit
+        run: |
+          useradd --create-home builder
+          cp -r packaging/arch /home/builder/build
+          sed -i "s|^source=.*|source=(\"\$pkgname::git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA\")|" \
+            /home/builder/build/PKGBUILD
+          chown -R builder: /home/builder/build
+          sudo -u builder git config --global --add safe.directory '*'
+          cd /home/builder/build && sudo -u builder makepkg --noconfirm
+      - name: Check the package contents
+        run: |
+          contents=$(bsdtar -tf /home/builder/build/plasmarec-*.pkg.tar.zst)
+          for path in \
+            usr/bin/plasmarec \
+            usr/share/applications/io.github.clearcmos.plasmarec.desktop \
+            usr/share/kwin/scripts/plasmarecghost/metadata.json \
+            usr/share/kwin/scripts/plasmarecghost/contents/code/main.js \
+            usr/share/licenses/plasmarec/LICENSE; do
+            grep -qx "$path" <<<"$contents" || { echo "missing from package: $path"; exit 1; }
+          done
+
+  actionlint:
+    name: Lint workflows (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: -color
+
+  # The single required check: red when any job above failed or was cancelled.
+  ci-ok:
+    name: CI OK
+    if: ${{ !cancelled() }}
+    needs: [checks, floor, package, actionlint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report job results
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: echo "$NEEDS_JSON"
+      - name: Fail if any needed job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

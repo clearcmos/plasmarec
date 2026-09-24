@@ -1,0 +1,45 @@
+# Maintainer: clearcmos
+# Build from this directory: makepkg -si
+pkgname=plasmarec
+pkgver=0.1.0.r0.g0000000
+pkgrel=1
+pkgdesc='Record one monitor on KDE Plasma to an MP4, with a status card kept out of the video'
+arch=('any')
+url='https://github.com/clearcmos/plasmarec'
+license=('MIT')
+depends=(
+    'python' 'python-gobject' 'python-cairo' 'gtk4' 'gtk4-layer-shell'
+    'gpu-screen-recorder' 'ffmpeg' 'pipewire' 'libnotify' 'util-linux'
+    'kwin>=6.6' 'xdg-desktop-portal-kde'
+)
+makedepends=('git' 'python-build' 'python-installer' 'python-hatchling' 'python-wheel')
+checkdepends=('python-pytest' 'nodejs')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$pkgname"
+    local ver
+    ver=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+    printf '%s.r%s.g%s' "$ver" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cd "$pkgname"
+    python -m build --wheel --no-isolation
+}
+
+check() {
+    cd "$pkgname"
+    PLASMAREC_REQUIRE_NODE=1 python -m pytest -q -p no:cacheprovider
+}
+
+package() {
+    cd "$pkgname"
+    python -m installer --destdir="$pkgdir" dist/*.whl
+    local kwin="$pkgdir/usr/share/kwin/scripts/plasmarecghost"
+    install -Dm0644 data/kwin/plasmarecghost/metadata.json -t "$kwin/"
+    install -Dm0644 data/kwin/plasmarecghost/contents/code/main.js -t "$kwin/contents/code/"
+    install -Dm0644 data/io.github.clearcmos.plasmarec.desktop -t "$pkgdir/usr/share/applications/"
+    install -Dm0644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}

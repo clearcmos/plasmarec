@@ -1,0 +1,85 @@
+[project]
+name = "plasmarec"
+version = "0.1.0"
+description = "Record one monitor on KDE Plasma to an MP4, with a status card kept out of the video"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "clearcmos" }]
+requires-python = ">=3.12"
+# PyGObject and pycairo come from the distribution (python-gobject,
+# python-cairo): they bind the system GTK and gtk4-layer-shell, so a PyPI
+# build would have to compile against the same libraries anyway.
+dependencies = []
+classifiers = [
+    "Environment :: X11 Applications :: GTK",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video :: Capture",
+]
+
+[project.urls]
+Homepage = "https://github.com/clearcmos/plasmarec"
+
+[project.scripts]
+plasmarec = "plasmarec.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plasmarec"]
+
+[dependency-groups]
+dev = [
+    "coverage>=7.10",
+    "mypy>=1.18",
+    "pytest>=8.4",
+    "ruff>=0.13",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
+
+# gi and cairo ship no type information; the GTK layer is typed at its own
+# boundary instead.
+[[tool.mypy.overrides]]
+module = ["gi", "gi.*", "cairo"]
+ignore_missing_imports = true
+
+# ui.py subclasses Gtk.Application and GTK widgets, which mypy sees as Any.
+[[tool.mypy.overrides]]
+module = ["plasmarec.ui"]
+disallow_subclassing_any = false
+disallow_any_unimported = false
+warn_return_any = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "error",
+    # Raised inside PyGObject's own GLib overrides at import, not by plasmarec.
+    "ignore:GLib.unix_signal_add_full is deprecated",
+]
+
+[tool.coverage.run]
+source = ["plasmarec"]
+branch = true
+# ui.py draws layer-shell surfaces and needs a live Wayland compositor with
+# wlr-layer-shell; its logic lives in session.py, which is covered.
+omit = ["*/plasmarec/ui.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

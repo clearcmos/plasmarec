@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Id": "plasmarecghost",
+        "Name": "plasmarec ghost",
+        "Description": "Keeps plasmarec's status card out of screen recordings",
+        "Icon": "media-record",
+        "Authors": [{ "Name": "clearcmos" }],
+        "License": "MIT",
+        "Version": "0.1.0",
+        "EnabledByDefault": true
+    },
+    "X-Plasma-API": "javascript"
+}

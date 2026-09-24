@@ -1,0 +1,21 @@
+# Python bytecode and tool caches
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# The dev virtualenv: machine-specific, it points at the system site packages
+.venv/
+
+# Wheel builds from `python -m build`
+/dist/
+/build/
+
+# makepkg output under packaging/arch: the bare clone, build and staging
+# trees, and the built package
+/packaging/arch/plasmarec/
+/packaging/arch/src/
+/packaging/arch/pkg/
+*.pkg.tar.*

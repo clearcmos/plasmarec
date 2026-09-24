@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=plasmarec
+GenericName=Screen Recorder
+Comment=Record one monitor to an MP4, with a status card kept out of the video
+Exec=plasmarec
+Icon=media-record
+Terminal=false
+StartupNotify=false
+Categories=AudioVideo;Video;Recorder;
+Keywords=screen;record;screencast;video;capture;
