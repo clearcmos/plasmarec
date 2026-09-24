@@ -39,9 +39,9 @@ script the first time it runs, so there is no need to log out.
 Then bind a key: System Settings > Keyboard > Shortcuts > Add New >
 Application > plasmarec.
 
-The first time you record each monitor, KDE's "Share screen with" dialog
-appears once. Choose the same monitor you clicked and tick "Allow restoring on
-future sessions". Later recordings of that monitor start without it.
+KDE's "Share screen with" dialog does not appear: the monitor you click in
+plasmarec's picker is the consent (see How it works). If a KDE update changes
+the format plasmarec writes, the dialog comes back; choose the same monitor.
 
 ## Configuration
 
@@ -64,8 +64,13 @@ firefox = "Firefox"
 ## How it works
 
 - Capture is gpu-screen-recorder through the screencast portal, which uses
-  KWin's own screencast. The portal cannot be told which monitor to share, so
-  each monitor keeps its own restore token under `~/.local/state/plasmarec`.
+  KWin's own screencast. The portal has no way to be told which monitor to
+  share; it only restores an earlier choice from a token. Before each
+  recording plasmarec writes that choice itself: a row in the portal's
+  permission store (the store `flatpak permission-set` edits) allowing
+  plasmarec to share the output at the clicked monitor's position, in the
+  format xdg-desktop-portal-kde uses for its own rows. This skips KDE's
+  consent dialog, which is the point; clicking the monitor is the consent.
 - The KWin script sets KWin's `excludeFromCapture` on plasmarec's windows and
   reports back over D-Bus. Only after that report does the card say "not in the
   video".

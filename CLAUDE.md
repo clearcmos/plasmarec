@@ -13,6 +13,7 @@ what users see.
 | `src/plasmarec/config.py` | `config.toml` parsing; unknown keys and bad types are errors. |
 | `src/plasmarec/calls.py` | PipeWire call detection from `pw-dump`, the sampling thread, span math. |
 | `src/plasmarec/capture.py` | gpu-screen-recorder argv, per-monitor restore tokens, the first-frame file. |
+| `src/plasmarec/portal.py` | Writes the portal permission-store row that pre-authorizes the picked monitor (KDE's restore-data format). |
 | `src/plasmarec/media.py` | ffmpeg finalize: mix the mic over call spans or drop its track by stream copy. |
 | `src/plasmarec/session.py` | The recording lifecycle as a GTK-free state machine (phase diagram in its docstring). |
 | `src/plasmarec/ui.py` | GTK4 layer-shell picker and status card, the `Ghost.Confirm` D-Bus method. Exempt from coverage: needs a live layer-shell compositor. |
@@ -43,8 +44,9 @@ Set up once: `uv venv --system-site-packages --python /usr/bin/python3 && uv syn
   author's system repo, and each consumer carries its own copy.
 - No PyPI runtime dependencies. PyGObject and pycairo come from the
   distribution, which is why the venv uses the system site packages.
-- Only `cli.py` (Gio, for the fast path) and `ui.py` import gi. Keep the other
-  modules GTK-free so they run on the Python 3.12 floor without a display.
+- Only `cli.py` and `portal.py` (Gio, for D-Bus) and `ui.py` (GTK) import gi.
+  Keep the other modules gi-free, and nothing outside `ui.py` may need a
+  display, so the suite runs on the Python 3.12 floor.
 - Changelog: none kept. Git history and tagged GitHub releases carry the notes.
 - Updates: dependabot, monthly, for GitHub Actions and the uv dev group. The
   Arch CI image floats on purpose.
@@ -61,6 +63,15 @@ Set up once: `uv venv --system-site-packages --python /usr/bin/python3 && uv syn
   share. One token file per connector makes KDE's dialog a one-time step per
   monitor. Verified on three monitors: after the first dialog each, later
   recordings started without it.
+- **plasmarec writes its own restore row (no dialog at all).** A restore
+  token is only a permission-store row: `{app_id: ["yes"]}` plus
+  `('KDE', 1, <QDataStream map>)` naming the output by logical position
+  `"<x>x<y>"`. Rows KDE wrote for three monitors read `960x142`, `0x0` and
+  `2667x0`, their kscreen positions. `portal.restore_data` reproduces KDE's
+  bytes exactly (golden test in `tests/test_portal.py`). A format change makes
+  the portal fall back to its dialog; it cannot share a different output than
+  the position names. Chosen over patching xdg-desktop-portal-kde, which
+  would mean maintaining a fork of a system package that users do not have.
 - **Ghost matched by pid.** Layer-shell surfaces have no app id; KWin sets
   their `resourceClass` to the executable name (`python3.14`). The script asks
   D-Bus for the pid owning the app id and compares it with `window.pid`.

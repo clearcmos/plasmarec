@@ -321,7 +321,8 @@ class App(Gtk.Application):
             win.destroy()
         self.pickers = []
         self.monitor = monitor
-        self.session = Session(monitor.get_connector(), self.config)
+        geometry = monitor.get_geometry()
+        self.session = Session(monitor.get_connector(), (geometry.x, geometry.y), self.config)
         self.show_card()
         GLib.timeout_add(GHOST_SETTLE_MS, self.start)
 
@@ -362,8 +363,8 @@ class App(Gtk.Application):
         if session.phase is Phase.STARTING:
             card.title.set_label("Starting")
             card.set_hint(
-                f"choose {connector} in KDE's dialog, tick Allow restoring"
-                if session.first_time
+                f"choose the {connector} entry in KDE's dialog"
+                if session.dialog_expected
                 else self.phrase("cancel")
             )
         elif session.phase is Phase.RECORDING:

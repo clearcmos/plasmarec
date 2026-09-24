@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import IO, Any, Protocol
 
-from plasmarec import calls, capture, media
+from plasmarec import calls, capture, media, portal
 from plasmarec.config import Config
 
 LOG_NAME = "gpu-screen-recorder.log"
@@ -68,8 +68,10 @@ class Session:
     def __init__(
         self,
         connector: str,
+        position: tuple[int, int],
         config: Config,
         *,
+        grant: Callable[[Path, tuple[int, int]], bool] = portal.grant,
         spawn: Callable[[list[str], IO[Any]], Process] = spawn_recorder,
         watch: calls.CallWatch | None = None,
         finalize: Callable[[Path, Path, list[tuple[float, float]], int], None] = media.finalize,
@@ -79,7 +81,9 @@ class Session:
         state: Path | None = None,
     ) -> None:
         self.connector = connector
+        self.position = position  # logical, as KDE names the output in its grant
         self.config = config
+        self._grant = grant
         self.calls = watch or calls.CallWatch(lambda: calls.probe(config.call_apps), clock)
         self._spawn = spawn
         self._finalize = finalize
@@ -94,8 +98,9 @@ class Session:
         self.name = ""
         self.take: Path | None = None
         self.outcome = Outcome()
-        # No token yet means KDE's share dialog is about to ask, once.
-        self.first_time = not self._token.exists()
+        # KDE's share dialog asks only if plasmarec could not write its own
+        # grant and there is no restore token from an earlier choice either.
+        self.dialog_expected = False
 
     # -- lifecycle -------------------------------------------------------------
 
@@ -107,6 +112,8 @@ class Session:
         stamp = self._now().strftime("%Y-%m-%d_%H-%M-%S")
         self.name = f"Recording_{stamp}.mp4"
         self.take = self._cache / f"{stamp}.mp4"
+        had_token = self._token.exists()
+        self.dialog_expected = not self._grant(self._token, self.position) and not had_token
         argv = capture.command(
             self.take, self._token, self.config.fps, self.config.audio_kbps, capture.scope_unit()
         )

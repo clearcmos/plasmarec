@@ -60,10 +60,16 @@ class Base(unittest.TestCase):
         self.recorders: list[FakeRecorder] = []
         self.finalized: list[tuple[Path, Path, list[tuple[float, float]], int]] = []
         self.answers: list[str | None] = []
+        self.grants: list[tuple[Path, tuple[int, int]]] = []
+        self.grant_ok = True
         self.watch = ManualWatch(lambda: self.answers.pop(0), clock=lambda: self.now)
 
     def tearDown(self) -> None:
         self.dir.cleanup()
+
+    def grant(self, token: Path, position: tuple[int, int]) -> bool:
+        self.grants.append((token, position))
+        return self.grant_ok
 
     def spawn(self, argv: list[str], log: IO[Any]) -> FakeRecorder:
         recorder = FakeRecorder(argv, log)
@@ -76,6 +82,7 @@ class Base(unittest.TestCase):
 
     def session(self, **overrides: Any) -> Session:
         options: dict[str, Any] = {
+            "grant": self.grant,
             "spawn": self.spawn,
             "watch": self.watch,
             "finalize": self.finalize,
@@ -85,7 +92,7 @@ class Base(unittest.TestCase):
             "state": self.state,
         }
         options.update(overrides)
-        return Session("DP-2", Config(output_dir=self.out, audio_kbps=128), **options)
+        return Session("DP-2", (960, 142), Config(output_dir=self.out, audio_kbps=128), **options)
 
     def recording(self) -> tuple[Session, FakeRecorder]:
         session = self.session()
@@ -98,20 +105,28 @@ class Base(unittest.TestCase):
 
 
 class Starting(Base):
-    def test_start_spawns_the_recorder_for_the_chosen_monitor(self) -> None:
+    def test_start_grants_the_chosen_monitor_then_spawns_the_recorder(self) -> None:
         session = self.session()
-        self.assertTrue(session.first_time)  # no token yet: KDE's dialog will ask once
         session.start()
+        token = self.state / "DP-2.token"
+        self.assertEqual(self.grants, [(token, (960, 142))])
+        self.assertFalse(session.dialog_expected)
         argv = self.recorders[0].argv
-        self.assertIn(str(self.state / "DP-2.token"), argv)
+        self.assertIn(str(token), argv)
         self.assertEqual(session.take, self.cache / "2026-09-23_20-56-28.mp4")
         self.assertIn("waiting for the portal", (self.cache / LOG_NAME).read_text())
         self.assertIs(session.phase, Phase.STARTING)
 
-    def test_an_existing_token_means_no_dialog(self) -> None:
-        self.state.mkdir(parents=True)
-        (self.state / "DP-2.token").write_text("token")
-        self.assertFalse(self.session().first_time)
+    def test_without_a_grant_the_dialog_asks_unless_a_token_exists(self) -> None:
+        self.grant_ok = False
+        session = self.session()
+        session.start()
+        self.assertTrue(session.dialog_expected)
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state / "DP-2.token").write_text("token from an earlier choice")
+        session = self.session()
+        session.start()
+        self.assertFalse(session.dialog_expected)
 
     def test_stays_starting_until_the_first_frame(self) -> None:
         session = self.session()
