@@ -250,7 +250,10 @@ def overlay_window(app: Gtk.Application, monitor: Any | None, keyboard: Any, wid
     win = Gtk.Window(application=app, decorated=False, resizable=False)
     win.set_default_size(width + 2 * SHADOW_SIDE, -1)
     LayerShell.init_for_window(win)
-    LayerShell.set_namespace(win, "plasmarec")
+    # KWin types a layer surface by its namespace; "utility" is one it leaves
+    # unanimated, so the cards' own Basalt motion is all that runs. Any other
+    # name makes the surface a Normal window and adds KWin's Scale zoom.
+    LayerShell.set_namespace(win, "utility")
     LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
     if monitor is not None:
         LayerShell.set_monitor(win, monitor)
