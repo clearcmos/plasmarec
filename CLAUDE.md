@@ -109,3 +109,11 @@ Set up once: `uv venv --system-site-packages --python /usr/bin/python3 && uv syn
 - **`register_object_with_closures2` with a fallback.** PyGObject marks
   `DBusConnection.register_object` deprecated; the replacement needs GLib 2.84,
   and KDE neon's Ubuntu 24.04 base has 2.80.
+- **The keyboard picker takes the keyboard back when it loses it.** KWin
+  activates an exclusive layer surface only when its keyboard mode changes
+  (`LayerShellV1Window::handleAcceptsFocusChanged`), so any window that maps or
+  is clicked kept the focus and Esc stopped cancelling. `on_picker_focus` turns
+  the mode off and on again, `REGRAB_MS` apart so KWin sees two commits. No unit
+  test covers it because `ui.py` needs a live compositor; it was verified
+  against KWin by activating another window and reading
+  `workspace.activeWindow` from a KWin script, then sending Esc.

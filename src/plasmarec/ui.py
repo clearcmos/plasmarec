@@ -41,6 +41,9 @@ POLL_MS = 100
 # round trip of the map; this keeps the first captured frame after it.
 GHOST_SETTLE_MS = 150
 FADE_IN_MS = 140
+# Keyboard mode off, then back on this long later: long enough for the off
+# state to reach KWin in its own commit, so it sees the change.
+REGRAB_MS = 50
 
 GHOST_XML = f"""<node><interface name="{GHOST_INTERFACE}"><method name="Confirm"/></interface></node>"""
 
@@ -307,10 +310,30 @@ class App(Gtk.Application):
             keys = Gtk.EventControllerKey()
             keys.connect("key-pressed", self.on_pick_key)
             win.add_controller(keys)
+            if keyboard == LayerShell.KeyboardMode.EXCLUSIVE:
+                win.connect("notify::is-active", self.on_picker_focus)
             win.set_child(card.panel)
             win.present()
             card.fade_in()
             self.pickers.append((monitor, win))
+
+    def on_picker_focus(self, win: Any, _pspec: Any) -> None:
+        """Take the keyboard back whenever another window gets it.
+
+        KWin activates an exclusive layer surface only when its keyboard mode
+        changes, not for as long as it is mapped, so a window that opens or is
+        clicked keeps the focus and Esc stops reaching the picker. Turning the
+        mode off and on again makes KWin activate the picker once more."""
+        if not self.picking or win.is_active():
+            return
+        LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)
+
+        def regrab() -> bool:
+            if self.picking:
+                LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.EXCLUSIVE)
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(REGRAB_MS, regrab)
 
     def on_pick_key(self, _controller: Any, keyval: int, _keycode: int, _state: Any) -> bool:
         if keyval == Gdk.KEY_Escape:
