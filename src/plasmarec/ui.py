@@ -47,13 +47,13 @@ GHOST_XML = f"""<node><interface name="{GHOST_INTERFACE}"><method name="Confirm"
 CSS = """
 window { background: transparent; }
 .panel {
-  background-color: #161618;
+  background-color: #1f1f23;
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 17px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
 }
 .panel.pick { transition: background-color 120ms; }
-.panel.pick:hover { background-color: #1c1c1f; }
+.panel.pick:hover { background-color: #25252a; }
 .title {
   color: #e6e6e6;
   font-family: "Hack", "JetBrains Mono", monospace;
@@ -61,12 +61,12 @@ window { background: transparent; }
   font-weight: bold;
 }
 .meta {
-  color: #7f7f86;
+  color: #86868d;
   font-family: "Hack", "JetBrains Mono", monospace;
   font-size: 14px;
 }
 .chip {
-  background-color: #202024;
+  background-color: #29292f;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 7px;
   color: #5c9ae6;
@@ -81,7 +81,7 @@ window { background: transparent; }
   font-size: 16px;
 }
 .hint {
-  color: #7f7f86;
+  color: #86868d;
   font-family: "Hack", "JetBrains Mono", monospace;
   font-size: 13px;
 }
