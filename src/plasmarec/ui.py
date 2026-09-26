@@ -292,6 +292,10 @@ class App(Gtk.Application):
         # Connector of the output the user was on when plasmarec started; the
         # quality panel opens there.
         self.home: str | None = None
+        # Connector of the picker card under the pointer, if any. E opens the
+        # quality panel there instead, since the pointer is a better sign of
+        # where the user is looking than the keyboard, which one picker holds.
+        self.hovered: str | None = None
         self.session: Session | None = None
         self.card: Card | None = None
         self.ghosted = False
@@ -386,6 +390,11 @@ class App(Gtk.Application):
             click = Gtk.GestureClick()
             click.connect("released", lambda *_, m=monitor: self.choose(m))
             card.panel.add_controller(click)
+            connector = monitor.get_connector()
+            motion = Gtk.EventControllerMotion()
+            motion.connect("enter", lambda *_, c=connector: self.hover(c))
+            motion.connect("leave", lambda *_, c=connector: self.unhover(c))
+            card.panel.add_controller(motion)
             keys = Gtk.EventControllerKey()
             keys.connect("key-pressed", self.on_pick_key)
             win.add_controller(keys)
@@ -396,6 +405,13 @@ class App(Gtk.Application):
             card.fade_in()
             self.pickers.append((monitor, win))
         register_dismiss()
+
+    def hover(self, connector: str) -> None:
+        self.hovered = connector
+
+    def unhover(self, connector: str) -> None:
+        if self.hovered == connector:
+            self.hovered = None
 
     def on_picker_focus(self, win: Any, _pspec: Any) -> None:
         """Take the keyboard back whenever another window gets it.
@@ -432,6 +448,9 @@ class App(Gtk.Application):
     def open_settings(self) -> None:
         """Swap the pickers for one quality panel on the user's output.
 
+        That is the output whose picker card is under the pointer, or, with
+        the pointer on no card, the one the user was on at start.
+
         Still picking as far as the hotkey and Esc are concerned: either one
         cancels the whole flow, as it does on the pickers."""
         if not self.picking or self.settings is not None:
@@ -439,7 +458,8 @@ class App(Gtk.Application):
         for _, win in self.pickers:
             win.destroy()
         self.pickers = []
-        home = next((m for m in monitors() if m.get_connector() == self.home), None)
+        target = self.hovered or self.home
+        home = next((m for m in monitors() if m.get_connector() == target), None)
         win = overlay_window(self, home, LayerShell.KeyboardMode.EXCLUSIVE, SETTINGS_WIDTH)
         win.connect("notify::is-active", self.on_picker_focus)
         card = Card("Recording quality")
