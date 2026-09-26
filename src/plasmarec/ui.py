@@ -49,7 +49,20 @@ FADE_IN_MS = 140
 # state to reach KWin in its own commit, so it sees the change.
 REGRAB_MS = 50
 
-GHOST_XML = f"""<node><interface name="{GHOST_INTERFACE}"><method name="Confirm"/></interface></node>"""
+GHOST_XML = f"""<node><interface name="{GHOST_INTERFACE}">
+<method name="Confirm"/>
+<method name="Pointer"><arg name="output" type="s" direction="in"/></method>
+</interface></node>"""
+# Longest wait for KWin to say where the cursor is before E opens the quality
+# panel on the start output instead.
+POINTER_WAIT_MS = 300
+# Loaded once per E press: reports the output under the cursor. A layer
+# surface cannot see the pointer outside itself, and KWin's activeOutputName
+# follows the keyboard, which one picker holds, so only KWin's own
+# cursorPos says which screen the user is on.
+POINTER_JS = """var o = workspace.screenAt(workspace.cursorPos);
+callDBus("%s", "%s", "%s", "Pointer", o ? o.name : "");
+"""
 
 CSS = """
 window { background: transparent; }
@@ -292,10 +305,10 @@ class App(Gtk.Application):
         # Connector of the output the user was on when plasmarec started; the
         # quality panel opens there.
         self.home: str | None = None
-        # Connector of the picker card under the pointer, if any. E opens the
-        # quality panel there instead, since the pointer is a better sign of
-        # where the user is looking than the keyboard, which one picker holds.
-        self.hovered: str | None = None
+        # E asks KWin which output the cursor is on (see ask_pointer) and
+        # waits for the answer: the pending script and the fallback timer.
+        self.pointer_script: tuple[str, str] | None = None
+        self.pointer_timer = 0
         self.session: Session | None = None
         self.card: Card | None = None
         self.ghosted = False
@@ -307,11 +320,13 @@ class App(Gtk.Application):
         info = Gio.DBusNodeInfo.new_for_xml(GHOST_XML).interfaces[0]
 
         def on_call(
-            _conn: Any, _sender: str, _path: str, _iface: str, method: str, _params: Any, invocation: Any
+            _conn: Any, _sender: str, _path: str, _iface: str, method: str, params: Any, invocation: Any
         ) -> None:
             if method == "Confirm":
                 self.ghosted = True
                 GLib.idle_add(self.render)
+            elif method == "Pointer":
+                GLib.idle_add(self.pointer_answered, params.unpack()[0])
             invocation.return_value(None)
 
         # register_object_with_closures2 is GLib 2.84+; older GLib only has
@@ -370,6 +385,7 @@ class App(Gtk.Application):
 
     def do_shutdown(self) -> None:
         unregister_dismiss()
+        self.drop_pointer_script()
         Gtk.Application.do_shutdown(self)
 
     # -- picker ----------------------------------------------------------------
@@ -390,11 +406,6 @@ class App(Gtk.Application):
             click = Gtk.GestureClick()
             click.connect("released", lambda *_, m=monitor: self.choose(m))
             card.panel.add_controller(click)
-            connector = monitor.get_connector()
-            motion = Gtk.EventControllerMotion()
-            motion.connect("enter", lambda *_, c=connector: self.hover(c))
-            motion.connect("leave", lambda *_, c=connector: self.unhover(c))
-            card.panel.add_controller(motion)
             keys = Gtk.EventControllerKey()
             keys.connect("key-pressed", self.on_pick_key)
             win.add_controller(keys)
@@ -405,13 +416,6 @@ class App(Gtk.Application):
             card.fade_in()
             self.pickers.append((monitor, win))
         register_dismiss()
-
-    def hover(self, connector: str) -> None:
-        self.hovered = connector
-
-    def unhover(self, connector: str) -> None:
-        if self.hovered == connector:
-            self.hovered = None
 
     def on_picker_focus(self, win: Any, _pspec: Any) -> None:
         """Take the keyboard back whenever another window gets it.
@@ -446,10 +450,71 @@ class App(Gtk.Application):
     # -- quality settings --------------------------------------------------------
 
     def open_settings(self) -> None:
-        """Swap the pickers for one quality panel on the user's output.
+        """E on a picker: open the quality panel on the output under the cursor.
 
-        That is the output whose picker card is under the pointer, or, with
-        the pointer on no card, the one the user was on at start.
+        KWin answers through the Pointer D-Bus method; without an answer in
+        POINTER_WAIT_MS (not KWin, or scripting failed) it opens on the
+        output the user was on at start."""
+        if not self.picking or self.settings is not None or self.pointer_timer:
+            return
+        self.pointer_timer = GLib.timeout_add(POINTER_WAIT_MS, self.pointer_answered, "")
+        if not self.ask_pointer():
+            self.pointer_answered("")
+
+    def ask_pointer(self) -> bool:
+        """Load and run a one-shot KWin script that calls Pointer back.
+
+        Each press gets a fresh file and plugin name: loadScript refuses a
+        path it has already loaded, and ids are reused after unloadScript."""
+        stamp = f"{os.getpid()}-{GLib.get_monotonic_time()}"
+        path = os.path.join(GLib.get_user_runtime_dir(), f"plasmarec-pointer-{stamp}.js")
+        name = os.path.basename(path)[:-3]
+        object_path = self.get_dbus_object_path() or ""
+        with open(path, "w") as f:
+            f.write(POINTER_JS % (APP_ID, object_path, GHOST_INTERFACE))
+        self.pointer_script = (path, name)
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+            reply = bus.call_sync(
+                "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "loadScript",
+                GLib.Variant("(ss)", (path, name)), GLib.VariantType("(i)"), Gio.DBusCallFlags.NONE, 1000,
+            )  # fmt: skip
+            script_id = reply.unpack()[0]
+            if script_id < 0:
+                return False
+            bus.call_sync(
+                "org.kde.KWin", f"/Scripting/Script{script_id}", "org.kde.kwin.Script", "run",
+                None, None, Gio.DBusCallFlags.NONE, 1000,
+            )  # fmt: skip
+        except GLib.Error:
+            return False
+        return True
+
+    def pointer_answered(self, connector: str) -> bool:
+        """The cursor's output from KWin, or "" when it did not answer in time."""
+        if not self.pointer_timer:
+            return GLib.SOURCE_REMOVE  # already answered, or the timer fired first
+        GLib.source_remove(self.pointer_timer)
+        self.pointer_timer = 0
+        self.drop_pointer_script()
+        self.show_settings(connector or self.home)
+        return GLib.SOURCE_REMOVE
+
+    def drop_pointer_script(self) -> None:
+        if self.pointer_script is None:
+            return
+        path, name = self.pointer_script
+        self.pointer_script = None
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+        with contextlib.suppress(GLib.Error):
+            Gio.bus_get_sync(Gio.BusType.SESSION).call_sync(
+                "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "unloadScript",
+                GLib.Variant("(s)", (name,)), None, Gio.DBusCallFlags.NONE, 1000,
+            )  # fmt: skip
+
+    def show_settings(self, target: str | None) -> None:
+        """Swap the pickers for one quality panel on the `target` output.
 
         Still picking as far as the hotkey and Esc are concerned: either one
         cancels the whole flow, as it does on the pickers."""
@@ -458,7 +523,6 @@ class App(Gtk.Application):
         for _, win in self.pickers:
             win.destroy()
         self.pickers = []
-        target = self.hovered or self.home
         home = next((m for m in monitors() if m.get_connector() == target), None)
         win = overlay_window(self, home, LayerShell.KeyboardMode.EXCLUSIVE, SETTINGS_WIDTH)
         win.connect("notify::is-active", self.on_picker_focus)
