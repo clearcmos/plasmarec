@@ -8,6 +8,8 @@ so it is exempt from the coverage gate (see pyproject.toml).
 
 from __future__ import annotations
 
+import contextlib
+import os
 import signal
 import subprocess
 from ctypes import CDLL
@@ -223,6 +225,21 @@ def overlay_window(app: Gtk.Application, monitor: Any, keyboard: Any, width: int
     return win
 
 
+DISMISS_PIDFILE = os.path.join(GLib.get_user_runtime_dir(), "basalt", "plasmarec.pid")
+
+
+def register_dismiss() -> None:
+    """Let Esc pressed anywhere reach the picker, via SIGUSR1 (on_dismiss)."""
+    os.makedirs(os.path.dirname(DISMISS_PIDFILE), exist_ok=True)
+    with open(DISMISS_PIDFILE, "w") as f:
+        f.write(f"{os.getpid()}\n")
+
+
+def unregister_dismiss() -> None:
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(DISMISS_PIDFILE)
+
+
 class App(Gtk.Application):
     def __init__(self, config: Config) -> None:
         super().__init__(application_id=APP_ID)
@@ -276,6 +293,7 @@ class App(Gtk.Application):
         )
         for sig in (signal.SIGTERM, signal.SIGINT):
             GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, sig, self.on_signal)
+        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self.on_dismiss)
         ensure_ghost_script()
         self.open_picker()
 
@@ -289,6 +307,21 @@ class App(Gtk.Application):
     def on_signal(self) -> bool:
         self.toggle()
         return GLib.SOURCE_CONTINUE
+
+    def on_dismiss(self) -> bool:
+        """SIGUSR1 from Basalt's Esc-from-anywhere hook cancels the picker.
+
+        The hook is the author's `basalt-dismiss`, bound to Esc below the
+        compositor. It signals every pid registered in the Basalt runtime
+        directory, so this is registered only while the picker is up, and a
+        running recording never hears it."""
+        if self.picking:
+            self.quit()
+        return GLib.SOURCE_CONTINUE
+
+    def do_shutdown(self) -> None:
+        unregister_dismiss()
+        Gtk.Application.do_shutdown(self)
 
     # -- picker ----------------------------------------------------------------
 
@@ -316,6 +349,7 @@ class App(Gtk.Application):
             win.present()
             card.fade_in()
             self.pickers.append((monitor, win))
+        register_dismiss()
 
     def on_picker_focus(self, win: Any, _pspec: Any) -> None:
         """Take the keyboard back whenever another window gets it.
@@ -348,6 +382,7 @@ class App(Gtk.Application):
         if not self.picking:
             return
         self.picking = False
+        unregister_dismiss()
         for _, win in self.pickers:
             win.destroy()
         self.pickers = []
