@@ -118,3 +118,11 @@ Set up once: `uv venv --system-site-packages --python /usr/bin/python3 && uv syn
   test covers it because `ui.py` needs a live compositor; it was verified
   against KWin by activating another window and reading
   `workspace.activeWindow` from a KWin script, then sending Esc.
+- **E asks KWin where the cursor is.** The quality panel opens on the output
+  under the cursor, so a one-shot KWin script reports
+  `workspace.screenAt(workspace.cursorPos)` through the `Pointer` D-Bus
+  method. Tracking hover on the picker cards missed a cursor anywhere else on
+  a screen (a layer surface sees the pointer only over itself), and
+  `activeOutputName` follows the keyboard, which one picker holds. Each press
+  loads a fresh file and plugin name because `loadScript` refuses a path it
+  has loaded before; 300 ms without an answer falls back to the start output.
