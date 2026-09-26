@@ -166,6 +166,24 @@ def ensure_ghost_script() -> None:
         pass  # not KWin; the status card will say the video shows it
 
 
+def active_output() -> str | None:
+    """The connector KWin treats as the active output, or None off KWin.
+
+    Asked before plasmarec maps anything: once the first picker holds the
+    keyboard, KWin's active output is that picker's monitor, not the one the
+    user was working on."""
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+        reply = bus.call_sync(
+            "org.kde.KWin", "/KWin", "org.kde.KWin", "activeOutputName",
+            None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 1000,
+        )  # fmt: skip
+    except GLib.Error:
+        return None
+    name = reply.unpack()[0]
+    return str(name) if name else None
+
+
 class Card:
     """Basalt anatomy: header (title, chip or meta), rule, body, hint."""
 
@@ -268,6 +286,9 @@ class App(Gtk.Application):
         self.setting_rows: list[tuple[Any, Any]] = []
         self.setting = 0
         self.monitor: Any = None
+        # Connector of the output the user was on when plasmarec started; the
+        # quality panel opens there.
+        self.home: str | None = None
         self.session: Session | None = None
         self.card: Card | None = None
         self.ghosted = False
@@ -315,6 +336,7 @@ class App(Gtk.Application):
             GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, sig, self.on_signal)
         GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self.on_dismiss)
         ensure_ghost_script()
+        self.home = active_output()
         self.open_picker()
 
     def toggle(self) -> None:
@@ -405,7 +427,7 @@ class App(Gtk.Application):
     # -- quality settings --------------------------------------------------------
 
     def open_settings(self) -> None:
-        """Swap the pickers for one quality panel on the active output.
+        """Swap the pickers for one quality panel on the user's output.
 
         Still picking as far as the hotkey and Esc are concerned: either one
         cancels the whole flow, as it does on the pickers."""
@@ -414,7 +436,8 @@ class App(Gtk.Application):
         for _, win in self.pickers:
             win.destroy()
         self.pickers = []
-        win = overlay_window(self, None, LayerShell.KeyboardMode.EXCLUSIVE, SETTINGS_WIDTH)
+        home = next((m for m in monitors() if m.get_connector() == self.home), None)
+        win = overlay_window(self, home, LayerShell.KeyboardMode.EXCLUSIVE, SETTINGS_WIDTH)
         win.connect("notify::is-active", self.on_picker_focus)
         card = Card("Recording quality")
         card.body.set_visible(False)
