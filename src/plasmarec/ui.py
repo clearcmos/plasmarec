@@ -418,7 +418,7 @@ class App(Gtk.Application):
         win.connect("notify::is-active", self.on_picker_focus)
         card = Card("Recording quality")
         card.body.set_visible(False)
-        card.set_hint("arrows or 1-4 choose    e saves    esc cancels")
+        card.set_hint("click saves    arrows or 1-4, then e    esc cancels")
         rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         rows.set_margin_top(10)
         rows.set_margin_start(18)  # rows reach past the text column by their padding
@@ -439,7 +439,7 @@ class App(Gtk.Application):
             row.append(text)
             row.append(chip)
             click = Gtk.GestureClick()
-            click.connect("released", lambda *_, i=index: self.mark(i))
+            click.connect("released", lambda *_, i=index: self.pick_setting(i))
             row.add_controller(click)
             rows.append(row)
             self.setting_rows.append((row, chip))
@@ -457,6 +457,11 @@ class App(Gtk.Application):
         self.setting = index % len(self.setting_rows)
         for i, (_, chip) in enumerate(self.setting_rows):
             chip.set_visible(i == self.setting)
+
+    def pick_setting(self, index: int) -> None:
+        """A click chooses and saves in one step, like the monitor cards."""
+        self.mark(index)
+        self.save_settings()
 
     def on_settings_key(self, _controller: Any, keyval: int, _keycode: int, _state: Any) -> bool:
         if keyval == Gdk.KEY_Escape:
