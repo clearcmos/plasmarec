@@ -115,7 +115,12 @@ class Session:
         had_token = self._token.exists()
         self.dialog_expected = not self._grant(self._token, self.position) and not had_token
         argv = capture.command(
-            self.take, self._token, self.config.fps, self.config.audio_kbps, capture.scope_unit()
+            self.take,
+            self._token,
+            self.config.fps,
+            self.config.audio_kbps,
+            capture.scope_unit(),
+            quality=self.config.quality,
         )
         try:
             with open(self._cache / LOG_NAME, "w") as log:

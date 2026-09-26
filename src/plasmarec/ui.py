@@ -13,6 +13,7 @@ import os
 import signal
 import subprocess
 from ctypes import CDLL
+from dataclasses import replace
 from typing import Any
 
 # gtk4-layer-shell has to be loaded before gi pulls in libwayland-client.
@@ -28,11 +29,12 @@ gi.require_version("GLibUnix", "2.0")
 from gi.repository import Gdk, Gio, GLib, GLibUnix, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from plasmarec import APP_ID, GHOST_INTERFACE, KWIN_SCRIPT  # noqa: E402
+from plasmarec import APP_ID, GHOST_INTERFACE, KWIN_SCRIPT, quality  # noqa: E402
 from plasmarec.config import Config  # noqa: E402
 from plasmarec.session import Phase, Session  # noqa: E402
 
 PICK_WIDTH = 400
+SETTINGS_WIDTH = 440
 CARD_WIDTH = 420
 TOP_MARGIN = 28
 # Basalt shadow-space: transparent surface kept around the card so its
@@ -78,6 +80,17 @@ window { background: transparent; }
   font-family: "Hack", "JetBrains Mono", monospace;
   font-size: 14px;
   padding: 2px 11px;
+}
+.row {
+  border-radius: 7px;
+  padding: 10px 11px;
+  transition: background-color 120ms;
+}
+.row:hover { background-color: #25252a; }
+.secondary {
+  color: #a0a0a0;
+  font-family: "Hack", "JetBrains Mono", monospace;
+  font-size: 16px;
 }
 .rule { background-color: rgba(255, 255, 255, 0.08); min-height: 1px; }
 .body {
@@ -214,13 +227,15 @@ class Card:
         self.panel.add_tick_callback(tick)
 
 
-def overlay_window(app: Gtk.Application, monitor: Any, keyboard: Any, width: int) -> Any:
+def overlay_window(app: Gtk.Application, monitor: Any | None, keyboard: Any, width: int) -> Any:
+    """A layer surface on `monitor`, or with None on the active output."""
     win = Gtk.Window(application=app, decorated=False, resizable=False)
     win.set_default_size(width + 2 * SHADOW_SIDE, -1)
     LayerShell.init_for_window(win)
     LayerShell.set_namespace(win, "plasmarec")
     LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
-    LayerShell.set_monitor(win, monitor)
+    if monitor is not None:
+        LayerShell.set_monitor(win, monitor)
     LayerShell.set_keyboard_mode(win, keyboard)
     return win
 
@@ -243,10 +258,15 @@ def unregister_dismiss() -> None:
 class App(Gtk.Application):
     def __init__(self, config: Config) -> None:
         super().__init__(application_id=APP_ID)
-        self.config = config
+        self.config = replace(config, quality=quality.load())
         self.started = False
         self.picking = False
         self.pickers: list[tuple[Any, Any]] = []
+        # The quality panel: its window, one (row, chip) per preset, and the
+        # preset it currently marks. Open only while picking.
+        self.settings: Any = None
+        self.setting_rows: list[tuple[Any, Any]] = []
+        self.setting = 0
         self.monitor: Any = None
         self.session: Session | None = None
         self.card: Card | None = None
@@ -335,8 +355,9 @@ class App(Gtk.Application):
             card = Card("Record this screen", chip=str(n))
             card.panel.add_css_class("pick")
             width, height = pixel_size(monitor)
-            card.body.set_label(f"{monitor.get_connector()}  {width}x{height}")
-            card.set_hint(f"click or press {n}    esc cancels")
+            chosen = quality.label(self.config.quality).lower()
+            card.body.set_label(f"{monitor.get_connector()}  {width}x{height}  {chosen}")
+            card.set_hint(f"click or press {n}    e quality    esc cancels")
             click = Gtk.GestureClick()
             click.connect("released", lambda *_, m=monitor: self.choose(m))
             card.panel.add_controller(click)
@@ -373,16 +394,106 @@ class App(Gtk.Application):
         if keyval == Gdk.KEY_Escape:
             self.quit()
             return True
+        if keyval in (Gdk.KEY_e, Gdk.KEY_E):
+            self.open_settings()
+            return True
         char = chr(Gdk.keyval_to_unicode(keyval) or 0)
         if char.isdigit() and 1 <= int(char) <= len(self.pickers):
             self.choose(self.pickers[int(char) - 1][0])
         return True
+
+    # -- quality settings --------------------------------------------------------
+
+    def open_settings(self) -> None:
+        """Swap the pickers for one quality panel on the active output.
+
+        Still picking as far as the hotkey and Esc are concerned: either one
+        cancels the whole flow, as it does on the pickers."""
+        if not self.picking or self.settings is not None:
+            return
+        for _, win in self.pickers:
+            win.destroy()
+        self.pickers = []
+        win = overlay_window(self, None, LayerShell.KeyboardMode.EXCLUSIVE, SETTINGS_WIDTH)
+        win.connect("notify::is-active", self.on_picker_focus)
+        card = Card("Recording quality")
+        card.body.set_visible(False)
+        card.set_hint("arrows or 1-4 choose    e saves    esc cancels")
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        rows.set_margin_top(10)
+        rows.set_margin_start(18)  # rows reach past the text column by their padding
+        rows.set_margin_end(18)
+        self.setting_rows = []
+        for index, preset in enumerate(quality.PRESETS):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+            row.add_css_class("row")
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+            name = Gtk.Label(label=f"{index + 1}  {preset.label}", xalign=0.0)
+            name.add_css_class("body")
+            note = Gtk.Label(label=preset.note, xalign=0.0)
+            note.add_css_class("secondary")
+            text.append(name)
+            text.append(note)
+            chip = Gtk.Label(label="selected", valign=Gtk.Align.CENTER)
+            chip.add_css_class("chip")
+            row.append(text)
+            row.append(chip)
+            click = Gtk.GestureClick()
+            click.connect("released", lambda *_, i=index: self.mark(i))
+            row.add_controller(click)
+            rows.append(row)
+            self.setting_rows.append((row, chip))
+        card.panel.insert_child_after(rows, card.body)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self.on_settings_key)
+        win.add_controller(keys)
+        win.set_child(card.panel)
+        self.settings = win
+        self.mark(next(i for i, p in enumerate(quality.PRESETS) if p.key == self.config.quality))
+        win.present()
+        card.fade_in()
+
+    def mark(self, index: int) -> None:
+        self.setting = index % len(self.setting_rows)
+        for i, (_, chip) in enumerate(self.setting_rows):
+            chip.set_visible(i == self.setting)
+
+    def on_settings_key(self, _controller: Any, keyval: int, _keycode: int, _state: Any) -> bool:
+        if keyval == Gdk.KEY_Escape:
+            self.quit()
+        elif keyval in (Gdk.KEY_e, Gdk.KEY_E):
+            self.save_settings()
+        elif keyval in (Gdk.KEY_Down, Gdk.KEY_Tab, Gdk.KEY_j):
+            self.mark(self.setting + 1)
+        elif keyval in (Gdk.KEY_Up, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_k):
+            self.mark(self.setting - 1)
+        else:
+            char = chr(Gdk.keyval_to_unicode(keyval) or 0)
+            if char.isdigit() and 1 <= int(char) <= len(self.setting_rows):
+                self.mark(int(char) - 1)
+        return True
+
+    def save_settings(self) -> None:
+        key = quality.PRESETS[self.setting].key
+        try:
+            quality.save(key)
+        except OSError as exc:
+            notify("Quality not saved", str(exc))
+        else:
+            self.config = replace(self.config, quality=key)
+        self.settings.destroy()
+        self.settings = None
+        self.setting_rows = []
+        self.open_picker()
 
     def choose(self, monitor: Any) -> None:
         if not self.picking:
             return
         self.picking = False
         unregister_dismiss()
+        if self.settings is not None:
+            self.settings.destroy()
+            self.settings = None
         for _, win in self.pickers:
             win.destroy()
         self.pickers = []

@@ -7,6 +7,11 @@ the video.
 
 - Press the key: a card appears on every monitor. Click one, or press its
   number (monitors count left to right). Esc cancels.
+- Press E on the picker to choose the recording quality: Medium, High, Very
+  high (the default) or Ultra, gpu-screen-recorder's own `-q` levels. Pick one
+  with the arrows, its number or a click, and press E again to save it and go
+  back to the picker. The choice is kept in
+  `~/.local/state/plasmarec/quality` for every later recording.
 - Press the key again: the recording stops and lands on your Desktop as
   `Recording_<date>_<time>.mp4` (H.264 video, AAC audio).
 - System audio is always recorded. Your microphone is mixed in only for the

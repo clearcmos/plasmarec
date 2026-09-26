@@ -117,6 +117,22 @@ class Starting(Base):
         self.assertIn("waiting for the portal", (self.cache / LOG_NAME).read_text())
         self.assertIs(session.phase, Phase.STARTING)
 
+    def test_the_chosen_quality_reaches_the_recorder(self) -> None:
+        config = Config(output_dir=self.out, quality="ultra")
+        Session(
+            "DP-2",
+            (960, 142),
+            config,
+            grant=self.grant,
+            spawn=self.spawn,
+            watch=self.watch,
+            cache=self.cache,
+            state=self.state,
+            now=lambda: datetime(2026, 9, 23, 20, 56, 28),
+        ).start()
+        argv = self.recorders[0].argv
+        self.assertEqual(argv[argv.index("-q") + 1], "ultra")
+
     def test_without_a_grant_the_dialog_asks_unless_a_token_exists(self) -> None:
         self.grant_ok = False
         session = self.session()

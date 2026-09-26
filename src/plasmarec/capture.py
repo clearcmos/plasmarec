@@ -51,7 +51,9 @@ def scope_unit() -> str:
     return f"app-{APP_ID}-{uuid.uuid4().hex}.scope"
 
 
-def command(output: Path, token: Path, fps: int, audio_kbps: int, unit: str) -> list[str]:
+def command(
+    output: Path, token: Path, fps: int, audio_kbps: int, unit: str, quality: str = "very_high"
+) -> list[str]:
     return [
         # systemd-run --scope execs the command, so the recorder keeps this
         # child's pid. --expand-environment=no: it would otherwise rewrite
@@ -72,7 +74,7 @@ def command(output: Path, token: Path, fps: int, audio_kbps: int, unit: str) -> 
         "-f", str(fps),
         # No -fm cfr: gpu-screen-recorder warns that constant frame rate can
         # overload the encoder and collapse to 1-2 fps. VFR MP4 plays anywhere.
-        "-q", "very_high",
+        "-q", quality,
         "-cursor", "yes",
         # Track 0 is system audio, track 1 the mic; media.finalize depends
         # on that order.

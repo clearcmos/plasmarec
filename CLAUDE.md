@@ -11,12 +11,13 @@ what users see.
 |---|---|
 | `src/plasmarec/cli.py` | Entry point. Forwards to a running instance over D-Bus before importing GTK (the second key press stops quickly). |
 | `src/plasmarec/config.py` | `config.toml` parsing; unknown keys and bad types are errors. |
+| `src/plasmarec/quality.py` | The quality presets and the remembered choice in the state dir (not a `config.toml` key, so the picker can write it). |
 | `src/plasmarec/calls.py` | PipeWire call detection from `pw-dump`, the sampling thread, span math. |
 | `src/plasmarec/capture.py` | gpu-screen-recorder argv, per-monitor restore tokens, the first-frame file. |
 | `src/plasmarec/portal.py` | Writes the portal permission-store row that pre-authorizes the picked monitor (KDE's restore-data format). |
 | `src/plasmarec/media.py` | ffmpeg finalize: mix the mic over call spans or drop its track by stream copy. |
 | `src/plasmarec/session.py` | The recording lifecycle as a GTK-free state machine (phase diagram in its docstring). |
-| `src/plasmarec/ui.py` | GTK4 layer-shell picker and status card, the `Ghost.Confirm` D-Bus method. Exempt from coverage: needs a live layer-shell compositor. |
+| `src/plasmarec/ui.py` | GTK4 layer-shell picker, quality panel and status card, the `Ghost.Confirm` D-Bus method. Exempt from coverage: needs a live layer-shell compositor. |
 | `data/kwin/plasmarecghost/` | KWin script: sets `excludeFromCapture` on plasmarec's windows, then calls `Ghost.Confirm`. |
 | `data/io.github.clearcmos.plasmarec.desktop` | Launcher users bind a shortcut to. |
 | `packaging/arch/PKGBUILD` | Arch package; CI builds it from the tested commit. |

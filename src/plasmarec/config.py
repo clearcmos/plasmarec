@@ -43,6 +43,9 @@ class Config:
     # "Meta+F2". plasmarec does not own the binding, so it cannot read it.
     shortcut: str = ""
     call_apps: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_CALL_APPS))
+    # Not a config.toml key: the picker's settings panel sets it, and the
+    # choice is remembered in the state dir (quality.py).
+    quality: str = "very_high"
 
 
 def config_path() -> Path:
