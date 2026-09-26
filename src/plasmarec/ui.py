@@ -33,6 +33,9 @@ from plasmarec.session import Phase, Session  # noqa: E402
 PICK_WIDTH = 400
 CARD_WIDTH = 420
 TOP_MARGIN = 28
+# Basalt shadow-space: transparent surface kept around the card so its
+# shadow-card is not clipped.
+SHADOW_SIDE, SHADOW_TOP, SHADOW_BOTTOM = 30, 20, 40
 POLL_MS = 100
 # Card mapped -> KWin flags it -> first frame. The flag is set within a D-Bus
 # round trip of the map; this keeps the first captured frame after it.
@@ -47,6 +50,7 @@ window { background: transparent; }
   background-color: #161618;
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 17px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
 }
 .panel.pick { transition: background-color 120ms; }
 .panel.pick:hover { background-color: #1c1c1f; }
@@ -57,7 +61,7 @@ window { background: transparent; }
   font-weight: bold;
 }
 .meta {
-  color: #55555c;
+  color: #7f7f86;
   font-family: "Hack", "JetBrains Mono", monospace;
   font-size: 14px;
 }
@@ -77,7 +81,7 @@ window { background: transparent; }
   font-size: 16px;
 }
 .hint {
-  color: #55555c;
+  color: #7f7f86;
   font-family: "Hack", "JetBrains Mono", monospace;
   font-size: 13px;
 }
@@ -150,6 +154,10 @@ class Card:
     def __init__(self, title: str, chip: str | None = None) -> None:
         self.panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.panel.add_css_class("panel")
+        self.panel.set_margin_start(SHADOW_SIDE)
+        self.panel.set_margin_end(SHADOW_SIDE)
+        self.panel.set_margin_top(SHADOW_TOP)
+        self.panel.set_margin_bottom(SHADOW_BOTTOM)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
         header.set_margin_top(22)
         header.set_margin_start(29)
@@ -203,7 +211,7 @@ class Card:
 
 def overlay_window(app: Gtk.Application, monitor: Any, keyboard: Any, width: int) -> Any:
     win = Gtk.Window(application=app, decorated=False, resizable=False)
-    win.set_default_size(width, -1)
+    win.set_default_size(width + 2 * SHADOW_SIDE, -1)
     LayerShell.init_for_window(win)
     LayerShell.set_namespace(win, "plasmarec")
     LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
@@ -337,7 +345,7 @@ class App(Gtk.Application):
     def show_card(self) -> None:
         win = overlay_window(self, self.monitor, LayerShell.KeyboardMode.NONE, CARD_WIDTH)
         LayerShell.set_anchor(win, LayerShell.Edge.TOP, True)
-        LayerShell.set_margin(win, LayerShell.Edge.TOP, TOP_MARGIN)
+        LayerShell.set_margin(win, LayerShell.Edge.TOP, TOP_MARGIN - SHADOW_TOP)
         # Click-through: an empty input region lets the pointer reach
         # whatever is under the card.
         win.connect("map", lambda w: w.get_surface().set_input_region(cairo.Region()))
