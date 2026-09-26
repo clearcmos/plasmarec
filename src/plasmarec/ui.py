@@ -1,9 +1,10 @@
 """GTK4 layer-shell surfaces: the monitor picker and the status card.
 
 Visual language: Basalt (dark floating panels, monospace, one blue accent).
-The recording lifecycle lives in session.py; this module draws it and turns
-input into calls on it. It needs a Wayland compositor with wlr-layer-shell,
-so it is exempt from the coverage gate (see pyproject.toml).
+The recording lifecycle lives in session.py, and what the surfaces say and
+what keys do lives in view.py; this module draws them and turns input into
+calls. It needs a Wayland compositor with wlr-layer-shell, so it is exempt
+from the coverage gate (see pyproject.toml).
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ gi.require_version("GLibUnix", "2.0")
 from gi.repository import Gdk, Gio, GLib, GLibUnix, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from plasmarec import APP_ID, GHOST_INTERFACE, KWIN_SCRIPT, quality  # noqa: E402
+from plasmarec import APP_ID, GHOST_INTERFACE, KWIN_SCRIPT, quality, view  # noqa: E402
 from plasmarec.config import Config  # noqa: E402
 from plasmarec.session import Phase, Session  # noqa: E402
 
@@ -56,14 +57,6 @@ GHOST_XML = f"""<node><interface name="{GHOST_INTERFACE}">
 # Longest wait for KWin to say where the cursor is before E opens the quality
 # panel on the start output instead.
 POINTER_WAIT_MS = 300
-# Loaded once per E press: reports the output under the cursor. A layer
-# surface cannot see the pointer outside itself, and KWin's activeOutputName
-# follows the keyboard, which one picker holds, so only KWin's own
-# cursorPos says which screen the user is on.
-POINTER_JS = """var o = workspace.screenAt(workspace.cursorPos);
-callDBus("%s", "%s", "%s", "Pointer", o ? o.name : "");
-"""
-
 CSS = """
 window { background: transparent; }
 .panel {
@@ -118,14 +111,6 @@ window { background: transparent; }
 }
 .hint.warn { color: #5c9ae6; }
 """
-
-
-def clock(seconds: float) -> str:
-    whole = int(seconds)
-    hours, rest = divmod(whole, 3600)
-    if hours:
-        return f"{hours}:{rest // 60:02d}:{rest % 60:02d}"
-    return f"{rest // 60}:{rest % 60:02d}"
 
 
 def notify(summary: str, body: str = "") -> None:
@@ -274,21 +259,6 @@ def overlay_window(app: Gtk.Application, monitor: Any | None, keyboard: Any, wid
     return win
 
 
-DISMISS_PIDFILE = os.path.join(GLib.get_user_runtime_dir(), "basalt", "plasmarec.pid")
-
-
-def register_dismiss() -> None:
-    """Let Esc pressed anywhere reach the picker, via SIGUSR1 (on_dismiss)."""
-    os.makedirs(os.path.dirname(DISMISS_PIDFILE), exist_ok=True)
-    with open(DISMISS_PIDFILE, "w") as f:
-        f.write(f"{os.getpid()}\n")
-
-
-def unregister_dismiss() -> None:
-    with contextlib.suppress(FileNotFoundError):
-        os.unlink(DISMISS_PIDFILE)
-
-
 class App(Gtk.Application):
     def __init__(self, config: Config) -> None:
         super().__init__(application_id=APP_ID)
@@ -384,7 +354,7 @@ class App(Gtk.Application):
         return GLib.SOURCE_CONTINUE
 
     def do_shutdown(self) -> None:
-        unregister_dismiss()
+        view.unregister_dismiss(GLib.get_user_runtime_dir())
         self.drop_pointer_script()
         Gtk.Application.do_shutdown(self)
 
@@ -399,9 +369,11 @@ class App(Gtk.Application):
             win = overlay_window(self, monitor, keyboard, PICK_WIDTH)
             card = Card("Record this screen", chip=str(n))
             card.panel.add_css_class("pick")
-            width, height = pixel_size(monitor)
-            chosen = quality.label(self.config.quality).lower()
-            card.body.set_label(f"{monitor.get_connector()}  {width}x{height}  {chosen}")
+            card.body.set_label(
+                view.picker_body(
+                    monitor.get_connector(), pixel_size(monitor), quality.label(self.config.quality)
+                )
+            )
             card.set_hint(f"click or press {n}    e quality    esc cancels")
             click = Gtk.GestureClick()
             click.connect("released", lambda *_, m=monitor: self.choose(m))
@@ -415,7 +387,7 @@ class App(Gtk.Application):
             win.present()
             card.fade_in()
             self.pickers.append((monitor, win))
-        register_dismiss()
+        view.register_dismiss(GLib.get_user_runtime_dir())
 
     def on_picker_focus(self, win: Any, _pspec: Any) -> None:
         """Take the keyboard back whenever another window gets it.
@@ -436,15 +408,15 @@ class App(Gtk.Application):
         GLib.timeout_add(REGRAB_MS, regrab)
 
     def on_pick_key(self, _controller: Any, keyval: int, _keycode: int, _state: Any) -> bool:
-        if keyval == Gdk.KEY_Escape:
+        action = view.picker_key(
+            Gdk.keyval_name(keyval) or "", chr(Gdk.keyval_to_unicode(keyval)), len(self.pickers)
+        )
+        if action == view.CANCEL:
             self.quit()
-            return True
-        if keyval in (Gdk.KEY_e, Gdk.KEY_E):
+        elif action == view.SETTINGS:
             self.open_settings()
-            return True
-        char = chr(Gdk.keyval_to_unicode(keyval) or 0)
-        if char.isdigit() and 1 <= int(char) <= len(self.pickers):
-            self.choose(self.pickers[int(char) - 1][0])
+        elif isinstance(action, int):
+            self.choose(self.pickers[action][0])
         return True
 
     # -- quality settings --------------------------------------------------------
@@ -467,11 +439,9 @@ class App(Gtk.Application):
         Each press gets a fresh file and plugin name: loadScript refuses a
         path it has already loaded, and ids are reused after unloadScript."""
         stamp = f"{os.getpid()}-{GLib.get_monotonic_time()}"
-        path = os.path.join(GLib.get_user_runtime_dir(), f"plasmarec-pointer-{stamp}.js")
-        name = os.path.basename(path)[:-3]
-        object_path = self.get_dbus_object_path() or ""
-        with open(path, "w") as f:
-            f.write(POINTER_JS % (APP_ID, object_path, GHOST_INTERFACE))
+        script, name, text = view.pointer_script(GLib.get_user_runtime_dir(), stamp)
+        path = str(script)
+        script.write_text(text)
         self.pointer_script = (path, name)
         try:
             bus = Gio.bus_get_sync(Gio.BusType.SESSION)
@@ -564,7 +534,7 @@ class App(Gtk.Application):
         card.fade_in()
 
     def mark(self, index: int) -> None:
-        self.setting = index % len(self.setting_rows)
+        self.setting = index
         for i, (_, chip) in enumerate(self.setting_rows):
             chip.set_visible(i == self.setting)
 
@@ -574,18 +544,14 @@ class App(Gtk.Application):
         self.save_settings()
 
     def on_settings_key(self, _controller: Any, keyval: int, _keycode: int, _state: Any) -> bool:
-        if keyval == Gdk.KEY_Escape:
+        name, char = Gdk.keyval_name(keyval) or "", chr(Gdk.keyval_to_unicode(keyval))
+        action = view.settings_key(name, char, self.setting, len(self.setting_rows))
+        if action == view.CANCEL:
             self.quit()
-        elif keyval in (Gdk.KEY_e, Gdk.KEY_E):
+        elif action == view.SAVE:
             self.save_settings()
-        elif keyval in (Gdk.KEY_Down, Gdk.KEY_Tab, Gdk.KEY_j):
-            self.mark(self.setting + 1)
-        elif keyval in (Gdk.KEY_Up, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_k):
-            self.mark(self.setting - 1)
-        else:
-            char = chr(Gdk.keyval_to_unicode(keyval) or 0)
-            if char.isdigit() and 1 <= int(char) <= len(self.setting_rows):
-                self.mark(int(char) - 1)
+        elif isinstance(action, int):
+            self.mark(action)
         return True
 
     def save_settings(self) -> None:
@@ -605,7 +571,7 @@ class App(Gtk.Application):
         if not self.picking:
             return
         self.picking = False
-        unregister_dismiss()
+        view.unregister_dismiss(GLib.get_user_runtime_dir())
         if self.settings is not None:
             self.settings.destroy()
             self.settings = None
@@ -641,34 +607,26 @@ class App(Gtk.Application):
         win.present()
         self.card.fade_in()
 
-    def phrase(self, verb: str) -> str:
-        key = self.config.shortcut.lower()
-        return f"{key} {verb}s" if key else f"run plasmarec again to {verb}"
-
     def render(self) -> bool:
         session, card = self.session, self.card
         if session is None or card is None:
             return GLib.SOURCE_REMOVE
-        connector = session.connector
-        mic = f"mic on, {session.calls.app}" if session.calls.app else "mic off"
-        card.body.set_label(f"{connector}  system audio  {mic}")
-        if session.phase is Phase.STARTING:
-            card.title.set_label("Starting")
-            card.set_hint(
-                f"choose the {connector} entry in KDE's dialog"
-                if session.dialog_expected
-                else self.phrase("cancel")
-            )
-        elif session.phase is Phase.RECORDING:
-            card.title.set_label("Recording")
-            card.side.set_label(clock(session.elapsed()))
-            if self.ghosted:
-                card.set_hint(f"{self.phrase('stop')}    not in the video")
-            else:
-                card.set_hint(f"{self.phrase('stop')}    visible in the video", warn=True)
-        elif session.phase in (Phase.SAVING, Phase.CANCELLING):
-            card.title.set_label("Saving" if session.phase is Phase.SAVING else "Cancelling")
-            card.set_hint("")
+        text = view.card_text(
+            session.phase,
+            session.connector,
+            session.calls.app,
+            session.dialog_expected,
+            self.ghosted,
+            self.config.shortcut,
+            session.elapsed() if session.phase is Phase.RECORDING else 0.0,
+        )
+        card.body.set_label(text.body)
+        if text.title is not None:
+            card.title.set_label(text.title)
+        if text.side is not None:
+            card.side.set_label(text.side)
+        if text.hint is not None:
+            card.set_hint(text.hint, warn=text.warn)
         return GLib.SOURCE_REMOVE
 
     def poll(self) -> bool:
@@ -678,15 +636,9 @@ class App(Gtk.Application):
         self.render()
         if not session.phase.finished:
             return GLib.SOURCE_CONTINUE
-        outcome = session.outcome
-        if session.phase is Phase.SAVED and outcome.path is not None:
-            notify(
-                "Recording saved",
-                f"{outcome.path.name}\n{clock(outcome.duration)}, {outcome.size / 1e6:.0f} MB",
-            )
-        elif session.phase is Phase.FAILED:
-            kept = f"\nThe raw take is at {outcome.kept}" if outcome.kept else ""
-            notify("Recording failed", outcome.error + kept)
+        notice = view.outcome_notice(session.phase, session.outcome)
+        if notice is not None:
+            notify(*notice)
         self.quit()
         return GLib.SOURCE_REMOVE
 

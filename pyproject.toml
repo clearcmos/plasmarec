@@ -77,7 +77,7 @@ filterwarnings = [
 source = ["plasmarec"]
 branch = true
 # ui.py draws layer-shell surfaces and needs a live Wayland compositor with
-# wlr-layer-shell; its logic lives in session.py, which is covered.
+# wlr-layer-shell; its logic lives in session.py and view.py, which are covered.
 omit = ["*/plasmarec/ui.py"]
 
 [tool.coverage.report]

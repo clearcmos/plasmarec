@@ -17,7 +17,8 @@ what users see.
 | `src/plasmarec/portal.py` | Writes the portal permission-store row that pre-authorizes the picked monitor (KDE's restore-data format). |
 | `src/plasmarec/media.py` | ffmpeg finalize: mix the mic over call spans or drop its track by stream copy. |
 | `src/plasmarec/session.py` | The recording lifecycle as a GTK-free state machine (phase diagram in its docstring). |
-| `src/plasmarec/ui.py` | GTK4 layer-shell picker, quality panel and status card, the `Ghost.Confirm` D-Bus method. Exempt from coverage: needs a live layer-shell compositor. |
+| `src/plasmarec/view.py` | Everything the surfaces decide without GTK: status-card and notification text, picker and quality-panel keys, the cursor-query KWin script, the Esc-from-anywhere pidfile. |
+| `src/plasmarec/ui.py` | GTK4 layer-shell picker, quality panel and status card, the `Ghost` D-Bus methods (`Confirm`, `Pointer`). Draws what `view.py` decides. Exempt from coverage: needs a live layer-shell compositor. |
 | `data/kwin/plasmarecghost/` | KWin script: sets `excludeFromCapture` on plasmarec's windows, then calls `Ghost.Confirm`. |
 | `data/io.github.clearcmos.plasmarec.desktop` | Launcher users bind a shortcut to. |
 | `packaging/arch/PKGBUILD` | Arch package; CI builds it from the tested commit. |
@@ -118,6 +119,20 @@ Set up once: `uv venv --system-site-packages --python /usr/bin/python3 && uv syn
   test covers it because `ui.py` needs a live compositor; it was verified
   against KWin by activating another window and reading
   `workspace.activeWindow` from a KWin script, then sending Esc.
+
+### 2026-09-26: Basalt dismissal, window type, and the quality panel
+
+- **Esc pressed anywhere cancels the picker.** The author's desktop binds Esc
+  to `basalt-dismiss`, which sends SIGUSR1 to every pid registered in
+  `$XDG_RUNTIME_DIR/basalt/` whose command line contains the file's name. The
+  picker registers `plasmarec.pid` while it is up and removes it when a monitor
+  is chosen or on shutdown, so a running recording never hears the signal.
+  Without the hook the file is inert; the regrab above covers Esc on its own.
+- **Layer-shell namespace `utility`.** KWin types a layer surface by its
+  namespace, and any name outside its list (the old `plasmarec`) makes it a
+  Normal window, which runs KWin's Scale zoom on top of the cards' own fade.
+  `utility` gets no KWin animation. The ghost script matches by pid, not by
+  namespace, so capture exclusion is unaffected.
 - **E asks KWin where the cursor is.** The quality panel opens on the output
   under the cursor, so a one-shot KWin script reports
   `workspace.screenAt(workspace.cursorPos)` through the `Pointer` D-Bus
@@ -126,3 +141,7 @@ Set up once: `uv venv --system-site-packages --python /usr/bin/python3 && uv syn
   `activeOutputName` follows the keyboard, which one picker holds. Each press
   loads a fresh file and plugin name because `loadScript` refuses a path it
   has loaded before; 300 ms without an answer falls back to the start output.
+- **`view.py` split out of `ui.py`.** `ui.py` is exempt from coverage, and it
+  had grown to hold card text, both key maps, the cursor-query script and the
+  pidfile, none of which needs GTK. They moved to `view.py`, which is covered;
+  `ui.py` keeps only drawing and wiring.
