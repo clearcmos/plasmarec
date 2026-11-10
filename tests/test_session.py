@@ -62,6 +62,7 @@ class Base(unittest.TestCase):
         self.answers: list[str | None] = []
         self.grants: list[tuple[Path, tuple[int, int]]] = []
         self.grant_ok = True
+        self.mic_ok = True
         self.watch = ManualWatch(lambda: self.answers.pop(0), clock=lambda: self.now)
 
     def tearDown(self) -> None:
@@ -85,6 +86,7 @@ class Base(unittest.TestCase):
             "grant": self.grant,
             "spawn": self.spawn,
             "watch": self.watch,
+            "mic_usable": lambda: self.mic_ok,
             "finalize": self.finalize,
             "clock": lambda: self.now,
             "now": lambda: datetime(2026, 9, 23, 20, 56, 28),
@@ -126,12 +128,27 @@ class Starting(Base):
             grant=self.grant,
             spawn=self.spawn,
             watch=self.watch,
+            mic_usable=lambda: True,
             cache=self.cache,
             state=self.state,
             now=lambda: datetime(2026, 9, 23, 20, 56, 28),
         ).start()
         argv = self.recorders[0].argv
         self.assertEqual(argv[argv.index("-q") + 1], "ultra")
+
+    def test_a_mic_that_would_flip_a_headset_is_not_opened_or_watched(self) -> None:
+        self.mic_ok = False
+        session = self.session()
+        session.start()
+        argv = self.recorders[0].argv
+        self.assertNotIn("default_input", argv)
+        self.assertFalse(session.mic)
+        self.recorders[0].begin(t0_us=10_000_000)
+        session.poll()
+        session.stop()
+        session.wait()
+        self.assertIs(session.phase, Phase.SAVED)
+        self.assertEqual(self.finalized[0][2], [])  # no call spans without a mic
 
     def test_without_a_grant_the_dialog_asks_unless_a_token_exists(self) -> None:
         self.grant_ok = False

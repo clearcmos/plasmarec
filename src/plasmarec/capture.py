@@ -52,8 +52,16 @@ def scope_unit() -> str:
 
 
 def command(
-    output: Path, token: Path, fps: int, audio_kbps: int, unit: str, quality: str = "very_high"
+    output: Path,
+    token: Path,
+    fps: int,
+    audio_kbps: int,
+    unit: str,
+    quality: str = "very_high",
+    mic: bool = True,
 ) -> list[str]:
+    """`mic=False` leaves out the mic track; media.finalize then keeps the
+    system audio by stream copy."""
     return [
         # systemd-run --scope execs the command, so the recorder keeps this
         # child's pid. --expand-environment=no: it would otherwise rewrite
@@ -79,7 +87,7 @@ def command(
         # Track 0 is system audio, track 1 the mic; media.finalize depends
         # on that order.
         "-a", "default_output",
-        "-a", "default_input",
+        *(["-a", "default_input"] if mic else []),
         "-write-first-frame-ts", "yes",
         "-v", "no",
         "-o", str(output),

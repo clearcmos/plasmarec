@@ -17,6 +17,10 @@ the video.
 - System audio is always recorded. Your microphone is mixed in only for the
   parts of the recording where a call app (Discord, a browser in Google Meet,
   Zoom, and so on) was using it.
+- If your microphone is a Bluetooth headset that is playing in high-quality
+  (A2DP) mode, plasmarec leaves the mic out of the recording. Opening it would
+  switch the headset to its call profile and cut the sound of everything
+  playing through it.
 
 ## Requirements
 
@@ -91,6 +95,9 @@ firefox = "Firefox"
 - Whole monitors only; no region or window recording, no pause.
 - A call counts from the moment the app opens the mic, including while you are
   muted in it, and any browser tab using the mic counts as a call.
+- With a Bluetooth headset as the default mic, the check happens once, at the
+  start. A call joined on the headset after the recording started is not in
+  the file; start the recording after joining.
 - Recordings use a variable frame rate. Players and browsers handle it; some
   video editors prefer constant frame rate.
 - Other desktops are not supported. niri and Hyprland can hide surfaces from

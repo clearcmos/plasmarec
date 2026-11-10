@@ -74,6 +74,7 @@ class Session:
         grant: Callable[[Path, tuple[int, int]], bool] = portal.grant,
         spawn: Callable[[list[str], IO[Any]], Process] = spawn_recorder,
         watch: calls.CallWatch | None = None,
+        mic_usable: Callable[[], bool] = calls.mic_usable,
         finalize: Callable[[Path, Path, list[tuple[float, float]], int], None] = media.finalize,
         clock: Callable[[], float] = time.monotonic,
         now: Callable[[], datetime] = datetime.now,
@@ -86,6 +87,7 @@ class Session:
         self._grant = grant
         self.calls = watch or calls.CallWatch(lambda: calls.probe(config.call_apps), clock)
         self._spawn = spawn
+        self._mic_usable = mic_usable
         self._finalize = finalize
         self._clock = clock
         self._now = now
@@ -101,6 +103,9 @@ class Session:
         # KDE's share dialog asks only if plasmarec could not write its own
         # grant and there is no restore token from an earlier choice either.
         self.dialog_expected = False
+        # False when opening the mic would flip a Bluetooth headset out of
+        # A2DP: no mic track, and no call watch, so the card says "mic off".
+        self.mic = True
 
     # -- lifecycle -------------------------------------------------------------
 
@@ -114,6 +119,7 @@ class Session:
         self.take = self._cache / f"{stamp}.mp4"
         had_token = self._token.exists()
         self.dialog_expected = not self._grant(self._token, self.position) and not had_token
+        self.mic = self._mic_usable()
         argv = capture.command(
             self.take,
             self._token,
@@ -121,6 +127,7 @@ class Session:
             self.config.audio_kbps,
             capture.scope_unit(),
             quality=self.config.quality,
+            mic=self.mic,
         )
         try:
             with open(self._cache / LOG_NAME, "w") as log:
@@ -128,7 +135,8 @@ class Session:
         except OSError as exc:
             self._fail(f"could not start gpu-screen-recorder: {exc}")
             return
-        self.calls.start()
+        if self.mic:
+            self.calls.start()
 
     def poll(self) -> None:
         """Advance on what the recorder has done. Call from the UI loop."""

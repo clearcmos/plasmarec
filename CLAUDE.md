@@ -145,3 +145,21 @@ Set up once: `uv venv --system-site-packages --python /usr/bin/python3 && uv syn
   had grown to hold card text, both key maps, the cursor-query script and the
   pidfile, none of which needs GTK. They moved to `view.py`, which is covered;
   `ui.py` keeps only drawing and wiring.
+
+### 2026-11-10: no mic track when it would flip a Bluetooth headset
+
+- **The mic is checked before the recorder opens it.** With a Bluetooth
+  headset as the default source, WirePlumber exposes a loopback source
+  (`bluez5.loopback`) even in A2DP, and with
+  `bluetooth.autoswitch-to-headset-profile` (on by default) any stream opening
+  it switches the card to HSP/HFP. That replaced the A2DP sink a game was
+  playing through and cut its sound for the whole take (journal: the bluez
+  sink `running -> error` the second gpu-screen-recorder started).
+  `calls.mic_switches_headset` reads `default.audio.source` from the
+  `default` metadata, and when that node is a loopback whose device's active
+  profile starts with `a2dp`, the take is recorded with system audio only and
+  the call watch never starts, so the card says "mic off".
+- **Checked once, at start.** gpu-screen-recorder's `-a` tracks are fixed for
+  the take, so a call joined on the headset mid-recording is lost. Accepted
+  over turning off autoswitch system-wide or moving the default mic.
+- **A failed pw-dump keeps the mic**, the behaviour before the check.

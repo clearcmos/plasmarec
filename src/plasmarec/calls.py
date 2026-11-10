@@ -49,15 +49,62 @@ def find_call(objects: list[dict[str, Any]], call_apps: Mapping[str, str]) -> st
     return None
 
 
-def probe(call_apps: Mapping[str, str]) -> str | None:
-    """find_call against the live PipeWire graph. A failed pw-dump reads as
-    no call: the mic then stays out, which is the safe side."""
+def mic_switches_headset(objects: list[dict[str, Any]]) -> bool:
+    """Whether opening the default mic would flip a Bluetooth headset out of
+    A2DP in a pw-dump object list.
+
+    WirePlumber gives a Bluetooth headset a loopback source
+    (`bluez5.loopback`) that is there even in A2DP, where the headset has no
+    mic. A stream opening it makes WirePlumber switch the card to its
+    HSP/HFP profile, which replaces the A2DP sink every other app is playing
+    through: their sound cuts out and comes back as low-rate mono."""
+    source = None
+    for obj in objects:
+        if (
+            obj.get("type") == "PipeWire:Interface:Metadata"
+            and (obj.get("props") or {}).get("metadata.name") == "default"
+        ):
+            for entry in obj.get("metadata") or []:
+                if entry.get("key") == "default.audio.source":
+                    source = (entry.get("value") or {}).get("name")
+    if not source:
+        return False
+    device = None
+    for obj in objects:
+        props = (obj.get("info") or {}).get("props") or {}
+        if obj.get("type") == "PipeWire:Interface:Node" and props.get("node.name") == source:
+            if not props.get("bluez5.loopback"):
+                return False
+            device = props.get("device.id")
+    for obj in objects:
+        if obj.get("type") == "PipeWire:Interface:Device" and obj.get("id") == device:
+            profiles = ((obj.get("info") or {}).get("params") or {}).get("Profile") or []
+            return any(str(p.get("name", "")).startswith("a2dp") for p in profiles)
+    return False
+
+
+def _dump() -> list[dict[str, Any]] | None:
     try:
         dump = subprocess.run(["pw-dump"], capture_output=True, text=True, timeout=3, check=True).stdout
         objects = json.loads(dump)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
-    return find_call(objects, call_apps) if isinstance(objects, list) else None
+    return objects if isinstance(objects, list) else None
+
+
+def probe(call_apps: Mapping[str, str]) -> str | None:
+    """find_call against the live PipeWire graph. A failed pw-dump reads as
+    no call: the mic then stays out, which is the safe side."""
+    objects = _dump()
+    return find_call(objects, call_apps) if objects is not None else None
+
+
+def mic_usable() -> bool:
+    """Whether the recorder may open the default mic without disturbing other
+    apps' sound. A failed pw-dump answers yes, the behaviour before this
+    check existed."""
+    objects = _dump()
+    return objects is None or not mic_switches_headset(objects)
 
 
 class CallWatch(threading.Thread):

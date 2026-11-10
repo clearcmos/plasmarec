@@ -30,6 +30,10 @@ class Command(unittest.TestCase):
     def test_system_audio_is_track_zero_and_mic_track_one(self) -> None:
         self.assertEqual(flag(self.argv, "-a"), ["default_output", "default_input"])
 
+    def test_without_the_mic_only_system_audio_is_recorded(self) -> None:
+        argv = capture.command(Path("/c/t.mp4"), Path("/s/t"), fps=30, audio_kbps=128, unit="u", mic=False)
+        self.assertEqual(flag(argv, "-a"), ["default_output"])
+
     def test_output_codecs_and_settings(self) -> None:
         self.assertEqual(flag(self.argv, "-o"), ["/c/take.mp4"])
         self.assertEqual(flag(self.argv, "-c"), ["mp4"])

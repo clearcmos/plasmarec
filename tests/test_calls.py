@@ -74,6 +74,65 @@ class Probe(unittest.TestCase):
                 self.assertIsNone(self.run_with(result))
 
 
+def defaults(source: str) -> dict[str, Any]:
+    return {
+        "id": 40,
+        "type": "PipeWire:Interface:Metadata",
+        "props": {"metadata.name": "default"},
+        "metadata": [{"subject": 0, "key": "default.audio.source", "value": {"name": source}}],
+    }
+
+
+def source(name: str, device: int, **props: Any) -> dict[str, Any]:
+    return {
+        "id": 141,
+        "type": "PipeWire:Interface:Node",
+        "info": {"props": {"node.name": name, "media.class": "Audio/Source", "device.id": device, **props}},
+    }
+
+
+def card(id_: int, profile: str) -> dict[str, Any]:
+    params = {"Profile": [{"name": profile}]}
+    return {"id": id_, "type": "PipeWire:Interface:Device", "info": {"params": params}}
+
+
+class MicSwitchesHeadset(unittest.TestCase):
+    BT = "bluez_input.00:11:22:33:44:55"
+
+    def test_bluetooth_loopback_mic_while_the_headset_plays_a2dp(self) -> None:
+        # Regression: opening this mic flipped the headset to HFP and cut the
+        # sound of a game playing through it for the whole recording.
+        loopback = source(self.BT, 127, **{"bluez5.loopback": True})
+        objects = [defaults(self.BT), loopback, card(127, "a2dp-sink")]
+        self.assertTrue(calls.mic_switches_headset(objects))
+
+    def test_headset_already_in_headset_mode_is_left_alone(self) -> None:
+        objects = [
+            defaults(self.BT),
+            source(self.BT, 127, **{"bluez5.loopback": True}),
+            card(127, "headset-head-unit"),
+        ]
+        self.assertFalse(calls.mic_switches_headset(objects))
+
+    def test_wired_mic_no_default_or_unknown_device(self) -> None:
+        usb = "alsa_input.usb-mic"
+        for objects in (
+            [defaults(usb), source(usb, 47), card(47, "a2dp-sink")],
+            [source(self.BT, 127, **{"bluez5.loopback": True}), card(127, "a2dp-sink")],
+            [defaults(self.BT), source(self.BT, 127, **{"bluez5.loopback": True})],
+        ):
+            with self.subTest(objects=objects):
+                self.assertFalse(calls.mic_switches_headset(objects))
+
+    def test_mic_usable_reads_the_live_graph_and_fails_open(self) -> None:
+        bt = [defaults(self.BT), source(self.BT, 127, **{"bluez5.loopback": True}), card(127, "a2dp-sink")]
+        done = subprocess.CompletedProcess([], 0, stdout=json.dumps(bt))
+        with mock.patch("plasmarec.calls.subprocess.run", return_value=done):
+            self.assertFalse(calls.mic_usable())
+        with mock.patch("plasmarec.calls.subprocess.run", side_effect=FileNotFoundError("pw-dump")):
+            self.assertTrue(calls.mic_usable())
+
+
 class Watch(unittest.TestCase):
     def test_spans_follow_the_probe(self) -> None:
         answers = iter([None, "Discord", "Discord", None, "Brave"])
